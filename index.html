@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#12000a">
+<title>My Love 💗</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:Arial,sans-serif;background:radial-gradient(circle at 50% 15%,#74133a,#260014 40%,#080005);color:#fff}
+body{overflow-x:hidden}
+.page{min-height:100vh;padding:20px 12px 35px;display:flex;flex-direction:column;align-items:center}
+h1{margin:4px 0;font-size:clamp(28px,8vw,46px);text-align:center}
+.sub{text-align:center;margin:0 0 12px}
+.controls{text-align:center;position:relative;z-index:50}
+button{border:0;border-radius:999px;padding:14px 20px;margin:4px;background:#ff4f91;color:#fff;font-size:16px;font-weight:800;box-shadow:0 5px 20px #0008}
+button:disabled{opacity:.45}
+#status{max-width:95vw;min-height:28px;margin:8px auto;padding:8px 12px;border-radius:12px;background:#0008;text-align:center;font-size:14px}
+.stage{position:relative;width:min(94vw,680px);aspect-ratio:4/3;margin:8px auto 14px;border:2px solid #ffffff20;border-radius:22px;overflow:hidden;background:#000;box-shadow:0 15px 45px #000b}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+video{transform:scaleX(-1)}
+canvas{z-index:2}
+#gesture{position:absolute;z-index:4;inset:0;display:flex;align-items:center;justify-content:center;font-size:clamp(30px,9vw,65px);font-weight:900;text-shadow:0 4px 18px #000;pointer-events:none}
+.card{width:min(94vw,680px);padding:18px 16px;border-radius:20px;background:#ffffff0c;border:1px solid #ffffff18;text-align:center}
+.card h2{margin:0 0 8px}.card p{margin:8px 0;font-size:18px}
+.music{width:min(94vw,680px);margin-top:14px}.music h2{font-size:24px}
+iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:18px}
+.note{font-size:12px;opacity:.65;text-align:center;margin-top:10px}
+.heart{position:fixed;bottom:-50px;font-size:25px;z-index:100;pointer-events:none;animation:up 4s linear forwards}
+@keyframes up{0%{transform:translate(0,0) scale(.6);opacity:0}12%{opacity:1}100%{transform:translate(var(--x),-115vh) rotate(25deg) scale(1.4);opacity:0}}
+</style>
+</head>
+<body>
+<div class="page">
+<h1>💗 My Love 💗</h1>
+<p class="sub">Gerakkan tanganmu di depan kamera</p>
+
+<div class="controls">
+<button id="startBtn" type="button">📷 MULAI KAMERA</button>
+<button id="stopBtn" type="button" disabled>⏹ STOP</button>
+</div>
+
+<div id="status">Tekan MULAI KAMERA untuk memulai.</div>
+
+<div class="stage">
+<video id="video" autoplay muted playsinline></video>
+<canvas id="canvas"></canvas>
+<div id="gesture">💗</div>
+</div>
+
+<div class="card">
+<h2>✊ ✋ Tanda Cinta</h2>
+<p>✊ Kepal tangan → 💗 LOVE</p>
+<p>✋ Buka telapak → 💕 I LOVE YOU</p>
+<p>☝️ Telunjuk → ☝️ I choose you</p>
+</div>
+
+<div class="music">
+<h2>🎵 My Love Mine All Mine</h2>
+<iframe src="https://www.youtube.com/embed/vx4kLgnFexo?rel=0&playsinline=1"
+title="My Love Mine All Mine" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+</div>
+<p class="note">Kamera hanya digunakan setelah tombol ditekan.</p>
+</div>
+
+<script>
+/*
+  BAGIAN KAMERA TIDAK MEMAKAI import/module.
+  Jadi walaupun MediaPipe gagal dimuat, tombol kamera TETAP bekerja.
+*/
+const video=document.getElementById("video");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const statusEl=document.getElementById("status");
+const startBtn=document.getElementById("startBtn");
+const stopBtn=document.getElementById("stopBtn");
+const gesture=document.getElementById("gesture");
+
+let stream=null, handLandmarker=null, running=false, lastTime=-1, lastHeart=0;
+
+function setStatus(t){statusEl.textContent=t}
+
+function heart(){
+ const e=document.createElement("div");
+ e.className="heart";
+ e.textContent=["💗","💕","💖","❤️","💘"][Math.floor(Math.random()*5)];
+ e.style.left=(10+Math.random()*80)+"vw";
+ e.style.setProperty("--x",(Math.random()*180-90)+"px");
+ document.body.appendChild(e);
+ setTimeout(()=>e.remove(),4500);
+}
+
+function fingers(l){
+ const tips=[8,12,16,20],pips=[6,10,14,18]; let n=0;
+ for(let i=0;i<4;i++)if(l[tips[i]].y<l[pips[i]].y)n++;
+ return n;
+}
+
+function classify(l){
+ const n=fingers(l);
+ if(n===0)return"fist";
+ if(n>=4)return"open";
+ if(n===1&&l[8].y<l[6].y)return"point";
+ return"other";
+}
+
+function draw(l){
+ ctx.fillStyle="#ff4f91";
+ for(const p of l){
+  ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,4,0,Math.PI*2);ctx.fill();
+ }
+}
+
+async function startCamera(){
+ try{
+  startBtn.disabled=true;
+  setStatus("⏳ Meminta izin kamera…");
+
+  if(!window.isSecureContext)
+    throw new Error("Halaman bukan HTTPS.");
+
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+    throw new Error("Chrome tidak menyediakan getUserMedia().");
+
+  // INI HARUS BERJALAN SEBELUM MEDIA PIPE.
+  stream=await navigator.mediaDevices.getUserMedia({
+   video:{facingMode:"user",width:{ideal:640},height:{ideal:480}},
+   audio:false
+  });
+
+  video.srcObject=stream;
+  await video.play();
+  stopBtn.disabled=false;
+  setStatus("✅ KAMERA AKTIF! Sekarang memuat deteksi tangan…");
+
+  // MediaPipe baru dimuat SETELAH kamera berhasil.
+  try{
+   setStatus("✅ Kamera aktif. Memuat deteksi tangan…");
+   const visionModule=await import(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22"
+   );
+   const vision=await visionModule.FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm"
+   );
+   handLandmarker=await visionModule.HandLandmarker.createFromOptions(vision,{
+    baseOptions:{
+     modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+     delegate:"GPU"
+    },
+    runningMode:"VIDEO",numHands:1,
+    minHandDetectionConfidence:.5,
+    minHandPresenceConfidence:.5,
+    minTrackingConfidence:.5
+   });
+   running=true;
+   setStatus("💗 Siap! ✊ = LOVE • ✋ = I LOVE YOU");
+   requestAnimationFrame(loop);
+  }catch(mp){
+   console.error(mp);
+   setStatus("✅ Kamera aktif, tetapi deteksi tangan gagal dimuat. Kamera tetap menyala.");
+   running=true;
+   requestAnimationFrame(cameraOnlyLoop);
+  }
+
+ }catch(e){
+  console.error(e);
+  let msg=e?.name?` [${e.name}]`:"";
+  setStatus("❌ Kamera gagal"+msg+": "+(e?.message||e));
+  startBtn.disabled=false;
+ }
+}
+
+function cameraOnlyLoop(){
+ if(!running)return;
+ requestAnimationFrame(cameraOnlyLoop);
+}
+
+function loop(){
+ if(!running)return;
+ if(video.readyState>=2){
+  if(canvas.width!==video.videoWidth||canvas.height!==video.videoHeight){
+   canvas.width=video.videoWidth||640;canvas.height=video.videoHeight||480;
+  }
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(handLandmarker&&video.currentTime!==lastTime){
+   lastTime=video.currentTime;
+   const r=handLandmarker.detectForVideo(video,performance.now());
+   if(r.landmarks&&r.landmarks.length){
+    const l=r.landmarks[0];draw(l);const g=classify(l);
+    if(g==="fist"){
+     gesture.textContent="💗 LOVE";
+     if(Date.now()-lastHeart>650){heart();lastHeart=Date.now()}
+    }else if(g==="open"){
+     gesture.textContent="💕 I LOVE YOU";
+     if(Date.now()-lastHeart>500){heart();lastHeart=Date.now()}
+    }else if(g==="point")gesture.textContent="☝️";
+    else gesture.textContent="💗";
+   }else gesture.textContent="💗";
+  }
+ }
+ requestAnimationFrame(loop);
+}
+
+function stopCamera(){
+ running=false;
+ if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+ video.srcObject=null;handLandmarker=null;
+ startBtn.disabled=false;stopBtn.disabled=true;
+ gesture.textContent="💗";ctx.clearRect(0,0,canvas.width,canvas.height);
+ setStatus("Kamera dihentikan.");
+}
+
+startBtn.addEventListener("click",startCamera);
+stopBtn.addEventListener("click",stopCamera);
+</script>
+</body>
+</html>
